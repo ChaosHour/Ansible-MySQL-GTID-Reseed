@@ -1,0 +1,15 @@
+---
+   
+    - name: Target | Clean up the backup directory on Target
+      ansible.builtin.file:
+        path: "{{ backup_path }}/target_checksum"
+        state: absent
+      delegate_to: "{{ target }}"
+      #when: target is defined
+
+    - name: Source | Clean up the backup directory on the Primary
+      ansible.builtin.file:
+        path: "{{ backup_path }}/source_checksum"
+        state: absent
+      delegate_to: "{{ source }}"
+      #when: sources is defined

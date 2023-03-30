@@ -1,0 +1,321 @@
+---
+- name: Check params
+  gather_facts: false
+  hosts: 127.0.0.1
+  connection: local
+  tasks:
+    - assert:
+        that:
+          - source is defined
+          - target is defined
+        msg: "source and target must be defined"
+    - assert:
+        that:
+          - source != target
+        msg: "source and target must be different"
+    - assert:
+        that:
+          - source is not none
+          - target is not none
+        msg: "source and target must not be none"
+- name: Ensure Source looks OK
+  gather_facts: false
+  hosts:
+    - "{{ source | default([]) }}"
+- name: Ensure Target looks OK
+  gather_facts: false
+  hosts:
+    - "{{ target | default([]) }}"
+
+- hosts: "{{ source | default([]) }}"
+  remote_user: vagrant
+  become: yes
+  become_user: root
+  become_method: sudo
+  gather_facts: True
+  vars_files:
+    -  vars/main.yml
+
+  tasks:
+
+    - name: Install percona-toolkit | qpress | pv | percona-xtrabackup-80 | source
+      ansible.builtin.apt:
+        pkg:
+          - percona-toolkit
+          - qpress
+          - pv
+          - percona-xtrabackup-80 
+        state: present
+      when: source is defined
+
+    - name: Stop MySQL on the target
+      ansible.builtin.service: 
+        name: mysql 
+        state: stopped 
+      delegate_to: "{{ target }}"
+      when: target is defined
+          
+    - name: Delete data in data01 logs01 | target
+      ansible.builtin.shell:
+        rm -rf /var/lib/mysql/*  
+      delegate_to: "{{ target }}"
+      when: target is defined
+      
+    - name: wait for ibdata01 to be deleted | target
+      ansible.builtin.wait_for: 
+        path: /var/lib/mysql/ibdata1 
+        state: absent
+      delegate_to: "{{ target }}"
+      when: target is defined
+      
+    - name: Clean any failed screen sessions on the replica | target
+      ansible.builtin.shell:  
+        screen -ls | grep migrate | cut -d. -f1 | awk '{print $1}' | xargs kill 2>>/dev/null
+      delegate_to: "{{ target }}"
+      when: target is defined
+      ignore_errors: True
+      
+      
+    - name: Clean any failed screen sessions on the primary | source
+      ansible.builtin.shell:  
+        screen -ls | grep migrate2 | cut -d. -f1 | awk '{print $1}' | xargs kill 2>>/dev/null
+      #command: pkill screen
+      #command: screen -wipe  
+      ignore_errors: True  
+      
+      
+    - name: start listener on replica | target
+      ansible.builtin.shell:
+        screen -S migrate -md bash -c 'nc -l 4000 | tee >(sha1sum > target_checksum) > mysql-$(date +%F).xbstream'
+        #screen -S migrate -md bash -c 'nc -l 4000 > mysql-$(date +%F).xbstream && sha1sum mysql-$(date +%F).xbstream > target_checksum'  
+      args:  
+          chdir: "{{ backup_path }}"
+          creates: "{{ backup_path }}/mysql-$(date +%F).xbstream"
+      async: 100
+      poll: 1
+      register: migrate_nc1
+      delegate_to: "{{ target }}"
+      when: target is defined
+      failed_when: migrate_nc1.rc != 0
+      changed_when: migrate_nc1.rc == 0
+      
+    
+    -  ansible.builtin.debug: 
+         var: migrate_nc1
+   
+      
+    - name: start transfer on primary
+      ansible.builtin.shell: 
+        screen -S migrate2 -md bash -c 'xtrabackup --backup --compress --compress-threads=1  --stream=xbstream --parallel=1 --datadir=/var/lib/mysql --target-dir=./ | tee >( sha1sum > source_checksum ) | nc -N "{{ target }}" 4000'
+        #screen -dmS migrate bash -c "innobackupex --defaults-file=/etc/my.cnf --user=root --password={{ mysql_root_pass }} --replica-info --no-timestamp /db/data01" 
+      args:
+         chdir: "{{ backup_path }}"
+         creates: "{{ backup_path }}/mysql-$(date +%F).xbstream"
+      #async: 45
+      #poll: 1
+      register: migrate_nc2
+      failed_when: migrate_nc2.rc != 0
+      changed_when: migrate_nc2.rc == 0
+      #delegate_to: "{{ primary }}"
+      when: target is defined
+
+    -  ansible.builtin.debug: 
+         var: migrate_nc2
+
+   
+    - name: Get pid of screen session on the primary   
+      ansible.builtin.command: pgrep screen
+      register: p_screen
+      ignore_errors: yes
+      
+    - ansible.builtin.debug: 
+        var: p_screen
+
+    - name: Wait for screen session on primary to complete  
+      ansible.builtin.wait_for: 
+        path: /proc/{{ p_screen.stdout }}/status  
+        state: absent    
+
+
+- hosts: "{{ target | default([]) }}"
+  remote_user: vagrant
+  become: yes
+  become_user: root
+  become_method: sudo
+  gather_facts: True
+  vars_files:
+    -  vars/main.yml
+  
+  tasks:
+
+    - name: Install percona-toolkit | qpress | pv | percona-xtrabackup-80 | target
+      ansible.builtin.apt:
+        pkg:
+          - percona-toolkit
+          - qpress
+          - pv
+          - percona-xtrabackup-80 
+        state: present
+      when: target is defined
+
+    - name: Get the sha1sum of the source file
+      ansible.builtin.shell: 
+        cat source_checksum | awk '{print $1}'
+      args:
+        chdir: "{{ backup_path }}"
+      register: source_checksum
+      ignore_errors: yes
+      delegate_to: "{{ source }}"
+      when: source is defined
+
+    - ansible.builtin.debug: 
+        var: source_checksum
+
+    - name: Get the sha1sum of the target file
+      ansible.builtin.shell: 
+         cat target_checksum | awk '{print $1}'
+      register: target_checksum
+      args:
+        chdir: "{{ backup_path }}"
+      ignore_errors: yes
+      when: target is defined
+
+    - ansible.builtin.debug: 
+        var: target_checksum        
+
+    - name: Check if the checksums match
+      ansible.builtin.assert:
+        that:
+          - source_checksum.stdout == target_checksum.stdout
+        msg: "Checksums do not match"
+      ignore_errors: no
+      when: target is defined
+       
+    - name: extract the xbstream files | target
+      ansible.builtin.shell: 
+        xbstream -xv < mysql-$(date +%F).xbstream -C /var/lib/mysql/
+      args:
+           chdir: /root/backup
+      register: xbstream
+      failed_when: xbstream.rc != 0
+      changed_when: xbstream.rc == 0
+      #delegate_to: "{{ replica }}"
+      when: target is defined
+
+    - ansible.builtin.debug: 
+        var: xbstream  
+
+           
+    - name: Extract qpress files | target
+      ansible.builtin.command: 
+        find  /var/lib/mysql -name "*.qp" -execdir qpress -dv \{\} . \; -exec rm {} \;
+      
+    - name: Prepare the logs | target
+      ansible.builtin.command:
+        xtrabackup --prepare --use-memory=2G --target-dir=/var/lib/mysql/
+      
+      
+    - name: Change owner ship to mysql of directories under /db
+      ansible.builtin.file:
+          path: /var/lib/mysql/
+          state: directory
+          recurse: True
+          mode: 0750
+          owner: mysql
+          group: mysql
+          
+          
+    - name: change owner ship to mysql of files under /db
+      ansible.builtin.command: 
+         find /var/lib/mysql/  -type f  -exec chmod 640  '{}' \;
+    
+   
+    - name: Remove auto.cnf from /var/lib/mysql dir on target
+      ansible.builtin.file: 
+        path: /var/lib/mysql/auto.cnf 
+        state: absent  
+     
+    - name: Start MySQL on the target
+      ansible.builtin.systemd: 
+        name: mysql 
+        state: started
+             
+    - name: Wait for MySQL before proceeding on target
+      ansible.builtin.wait_for: 
+        port: 3306 
+        host: "{{ ansible_hostname }}"
+        delay: 10
+        timeout: 60
+      #when: ansible_hostname == "{{ target }}"
+
+
+    - name: Cat xtrabackup_binlog file
+      ansible.builtin.shell:
+        cat xtrabackup_binlog_info | awk '{ print $3 }' | cut -d'/' -f4 
+        #cat xtrabackup_binlog_pos_innodb | awk '{ print $1 }' | cut -d'/' -f4
+      args:
+         chdir: /var/lib/mysql
+      register: xtra1_file  
+      
+    - ansible.builtin.debug: 
+        var: xtra1_file.stdout   
+   
+
+    - name: Purge gtids on the target
+      command: 
+        mysql -e "SET GLOBAL gtid_purged='{{ xtra1_file.stdout }}'"         
+    
+
+    - name: Stop Replication
+      community.mysql.mysql_replication: 
+         mode: stopreplica 
+         login_user: root 
+         login_password: "{{ mysql_root_pass }}"
+      #when: ansible_hostname == "{{ target }}"   
+    
+
+    - name: Change primary to start replication on target
+      community.mysql.mysql_replication:
+        mode: changeprimary
+        primary_host: "{{ source }}"
+        primary_user: repl
+        primary_password: "{{ mysql_repl_pass }}"
+        primary_auto_position: 1 
+        login_user: root
+        login_password: "{{ mysql_root_pass }}"
+      failed_when: false
+      #ignore_errors: true
+      #when: ansible_hostname == "{{ target }}"
+      register: repl_stat3
+ 
+    - name: Debug | Repl_stat3 | Replication Status
+      ansible.builtin.debug:
+        var: repl_stat3
+
+    - name: Start Replication on target
+      community.mysql.mysql_replication:
+        mode: startreplica
+        login_user: root
+        login_password: "{{ mysql_root_pass }}"
+      #when: ansible_hostname == "{{ target }}"
+    
+    - name: Check replication
+      community.mysql.mysql_replication:
+        mode: getreplica
+        login_port: 3306
+        login_user: root
+        login_password: "{{ mysql_root_pass }}"
+      register: repl_stat2
+
+    - name: Debug | Repl_stat2 | Replication status
+      ansible.builtin.debug:
+        var: repl_stat2
+    
+    - name: Debug | Repl_stat2 | Source_Host
+      ansible.builtin.debug:
+      # var: (repl_stat2.Master_Host,repl_stat2.Slave_IO_Running,repl_stat2.Slave_SQL_Running,repl_stat2.Executed_Gtid_Set)
+        var: (repl_stat2.Source_Host,repl_stat2.Replica_IO_Running,repl_stat2.Replica_SQL_Running,repl_stat2.Executed_Gtid_Set)
+      #when: ansible_hostname == "replica" or ansible_hostname == "etlreplica"
+
+    - include_tasks: cleanup.yml
+      #when: ansible_hostname in ['replica','etlreplica','primary']

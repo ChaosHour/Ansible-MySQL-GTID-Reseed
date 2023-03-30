@@ -1,0 +1,42 @@
+---
+
+# Set Vars For your mysql config file - my.cnf
+replication_server_id: "{% set j2l1 = ansible_all_ipv4_addresses[1].split('.') %} {% set j2l2 = j2l1[1:] | join() %} {% print (j2l2) %}"
+
+# backup path
+backup_path: "/root/backup"
+
+# Constants
+mysql_root_pass: "ou812"
+mysql_repl_pass: "slAv3"
+chaos_pass: "letmein"
+proxysql_admin_pass: "admin"
+sstuser_pass: "s3cret"
+monuser_pass: "monpass"
+orchestrator_pass: "orc_pass"
+
+# MySQL Password Hashes.
+mysql_root_hash: '*CC44899BBE450A06A0823407493390266377825C'
+proxysql_hash: '*80B8D2DDF2964C99015E26E508B22709762BBD0B'
+chaos_hash: '*D37C49F9CBEFBF8B6F4B165AC703AA271E079004'
+sstuser_hash: '*B865CAE8F340F6CE1485A06F4492BB49718DF1EC'
+monuser_hash: '*EC6A383BDA085D07ECA7FE38DEA96477ECA56C76'
+mysql_repl_hash: '*79536349C907C75D6CB57238E75EB257B429A751'
+dba_util_hash: '*02100A65644BDDB04BF2D4D651269E3FD127C2DD'
+orchestrator_hash: '*3399700C6147C93845A2DFFCB5876CAB5756155D'
+
+# Server ips
+#primary: "192.168.50.2"
+primary: "10.5.0.152"
+#replica: "192.168.50.3"
+replica: "10.5.0.153"
+#etlreplica: "192.168.50.4"
+etlreplica: "10.5.0.154"
+#proxysql: "192.168.50.5"
+proxysql: "10.5.0.150"
+orchestrator: "10.5.0.151"
+
+# Subnets
+host_subnet: "10.%"
+host_subnet2: "localhost"
+open_host: "%"
