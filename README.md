@@ -524,4 +524,4 @@ replica | CHANGED | rc=0 >>
            Replica_IO_Running: Yes
           Replica_SQL_Running: Yes
         Seconds_Behind_Source: 0
-        ```
+```
