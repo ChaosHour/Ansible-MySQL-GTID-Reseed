@@ -511,3 +511,17 @@ replica                    : ok=28   changed=15   unreachable=0    failed=0    s
 
 
 ```
+
+```bash
+ansible -i inventory all -l replica:etlreplica -e @vars/main.yml -m shell -b -a 'mysql -u root -p"{{ mysql_root_pass }}" -e "show replica status\G"| egrep "Replica_IO_Running:|Replica_SQL_Running:|Source_Host:|Seconds_Behind_Source:|SQL_Delay:"' | grep -v W
+etlreplica | CHANGED | rc=0 >>
+                  Source_Host: primary
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+        Seconds_Behind_Source: 0
+replica | CHANGED | rc=0 >>
+                  Source_Host: primary
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+        Seconds_Behind_Source: 0
+        ```
