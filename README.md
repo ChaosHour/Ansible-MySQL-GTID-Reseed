@@ -24,7 +24,7 @@ The playbook has a few debug statements so that you can see what is going on.
 
 ## Usage
 ```bash
-(data-sync) klarsen@Mac-Book-Pro2 data-sync % ansible-playbook -i inventory reseed.yml -e "source=primary target=replica"
+(data-sync) ansible-playbook -i inventory reseed.yml -e "source=primary target=replica"
 
 PLAY [Check params] *********************************************************************************************
 
