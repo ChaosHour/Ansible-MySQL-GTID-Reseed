@@ -3,11 +3,10 @@ Ansible MySQL 8 GTID Reseed Playbook
 
 
 ## Overview
+Testing the new version of Xtrabackup and wrapping it in Ansible to automate the process of reseeding a MySQL 8 replica with GTID.
 
-This is a slightly different take on an older Ansible playbook I wrote to reseed a MySQL 5.6 replica.  
-The playbook has a few debug statements so that you can see what is going on.
 
-## Requirements
+## Software Versions
 
 - ansible [core 2.14.0]
   python version = 3.11.0 (main, Nov 21 2022, 19:57:48) [Clang 14.0.0 (clang-1400.0.29.202)]
